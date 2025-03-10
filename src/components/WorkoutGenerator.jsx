@@ -49,65 +49,104 @@ const WorkoutGenerator = ({ muscleMetrics, userProfile, onWorkoutGenerated }) =>
   };
   
   // Generate a suggested workout based on metrics
-  function suggestWorkout(muscleMetrics, userProfile) {
-    const workout = {
-      primaryFocus: [],
-      secondaryFocus: [],
-      maintenance: []
-    };
-    
-    // Get all muscles that need work, sorted by priority
-    const muscleNeedsList = Object.entries(muscleMetrics)
-      .map(([muscle, metrics]) => ({
-        muscle,
-        isFocused: metrics.isFocused,
-        percentComplete: metrics.weeklyVolume / (userProfile.muscleGroupSettings[muscle]?.minimumDose || 10) * 100,
-        volumeNeeded: metrics.volumeNeededForMinimum,
-        recoveryStatus: metrics.recoveryStatus
-      }))
-      .filter(item => item.volumeNeeded > 0) // Only include muscles below minimum
-      .sort((a, b) => {
-        // First, prioritize by focus
-        if (a.isFocused && !b.isFocused) return -1;
-        if (!a.isFocused && b.isFocused) return 1;
-        
-        // Then by percent complete (lowest first)
-        return a.percentComplete - b.percentComplete;
-      });
-    
+// Generate a suggested workout based on metrics
+function suggestWorkout(muscleMetrics, userProfile) {
+  const workout = {
+    primaryFocus: [],
+    secondaryFocus: [],
+    maintenance: []
+  };
+  
+  // First, separate muscle groups into two categories:
+  // 1. Those with zero weekly volume (highest priority)
+  // 2. Those with some volume but still below minimum (second priority)
+  
+  const zeroVolumeGroups = [];
+  const belowMinimumGroups = [];
+  
+  // Identify muscle groups that are below minimum and sort them into the two categories
+  Object.entries(muscleMetrics)
+    .forEach(([muscle, metrics]) => {
+      if (metrics.volumeNeededForMinimum > 0) {
+        // Check if this muscle group has received any volume this week
+        if (metrics.weeklyVolume === 0) {
+          zeroVolumeGroups.push({
+            muscle,
+            isFocused: metrics.isFocused,
+            volumeNeeded: metrics.volumeNeededForMinimum,
+            recoveryStatus: metrics.recoveryStatus
+          });
+        } else {
+          belowMinimumGroups.push({
+            muscle,
+            isFocused: metrics.isFocused,
+            percentComplete: metrics.weeklyVolume / (userProfile.muscleGroupSettings[muscle]?.minimumDose || 10) * 100,
+            volumeNeeded: metrics.volumeNeededForMinimum,
+            recoveryStatus: metrics.recoveryStatus
+          });
+        }
+      }
+    });
+  
+    // Sort both groups by focus (focused items first), then by recovery status or percent complete
+    const sortedZeroVolume = zeroVolumeGroups.sort((a, b) => {
+      // First prioritize by focus
+      if (a.isFocused && !b.isFocused) return -1;
+      if (!a.isFocused && b.isFocused) return 1;
+
+      // Then by recovery status (more recovered first)
+      return b.recoveryStatus - a.recoveryStatus;
+    });
+
+    const sortedBelowMinimum = belowMinimumGroups.sort((a, b) => {
+      // First prioritize by focus
+      if (a.isFocused && !b.isFocused) return -1;
+      if (!a.isFocused && b.isFocused) return 1;
+
+      // Then by percent complete (lowest first)
+      return a.percentComplete - b.percentComplete;
+    });
+
+    // Combine the two lists, with zero volume groups first
+    const muscleNeedsList = [...sortedZeroVolume, ...sortedBelowMinimum];
+
     // Limit primary focus to 2-3 muscle groups
     const primaryLimit = 3;
-    
+
     // Select top priority muscles (max 3)
     const primaryMuscles = muscleNeedsList.slice(0, primaryLimit);
-    
+
     // Add to primary focus with appropriate set counts
     primaryMuscles.forEach(item => {
-      // Calculate appropriate sets - more for higher priority or less complete
-      const setCount = item.percentComplete < 30 ? 5 : 
-                       item.percentComplete < 50 ? 4 : 3;
-      
+      // Calculate appropriate sets
+      // For zero volume muscles, allocate more sets
+      const isZeroVolume = sortedZeroVolume.some(zero => zero.muscle === item.muscle);
+
+      // Calculate appropriate sets - more for higher priority or zero volume
+      const setCount = isZeroVolume ? 5 :
+        (item.percentComplete < 30 ? 4 : 3);
+
       workout.primaryFocus.push({
         muscle: item.muscle,
         sets: setCount
       });
     });
-    
+
     // Select next 1-2 muscles for secondary focus (if available)
     const secondaryLimit = 2;
     const secondaryMuscles = muscleNeedsList.slice(primaryLimit, primaryLimit + secondaryLimit);
-    
+
     secondaryMuscles.forEach(item => {
       workout.secondaryFocus.push({
         muscle: item.muscle,
         sets: 3 // Fixed 3 sets for secondary focus
       });
     });
-    
+
     // Add maintenance work for well-recovered muscles that are above minimum
     // but could use some additional work (max 1-2)
     const maintenanceCandidates = Object.entries(muscleMetrics)
-      .filter(([muscle, metrics]) => 
+      .filter(([muscle, metrics]) =>
         metrics.recoveryStatus > 90 && // Well recovered
         metrics.volumeNeededForMinimum === 0 && // Meeting minimum
         !workout.primaryFocus.some(m => m.muscle === muscle) && // Not already in primary
@@ -115,17 +154,17 @@ const WorkoutGenerator = ({ muscleMetrics, userProfile, onWorkoutGenerated }) =>
       )
       .sort((a, b) => b[1].recoveryStatus - a[1].recoveryStatus) // Most recovered first
       .slice(0, 1); // Just 1 maintenance muscle
-    
+
     maintenanceCandidates.forEach(([muscle]) => {
       workout.maintenance.push({
         muscle,
         sets: 2 // Just 2 maintenance sets
       });
     });
-    
+
     return workout;
   }
-  
+
   // Fetch exercises when component mounts
   useEffect(() => {
     const fetchExercises = async () => {
@@ -142,21 +181,21 @@ const WorkoutGenerator = ({ muscleMetrics, userProfile, onWorkoutGenerated }) =>
         setIsLoading(false);
       }
     };
-    
+
     fetchExercises();
   }, []);
-  
+
   const handleRecoveryChange = (muscle, value) => {
     setRecoveryFeedback({
       ...recoveryFeedback,
       [muscle]: value
     });
   };
-  
+
   const handleGenerateWorkout = () => {
     // Use the fetched exercises or fall back to local data if empty
     const exercisesToUse = exercises.length > 0 ? exercises : localExercises;
-    
+
     const generatedWorkout = generateWorkout({
       userProfile,
       muscleMetrics,
@@ -164,24 +203,24 @@ const WorkoutGenerator = ({ muscleMetrics, userProfile, onWorkoutGenerated }) =>
       recoveryFeedback,
       availableExercises: exercisesToUse
     });
-    
+
     onWorkoutGenerated(generatedWorkout);
   };
-  
+
   const handleGenerateRecommendedWorkout = () => {
     // Get dashboard recommendation
     const recommendation = getDashboardRecommendation();
-    
+
     // Use the fetched exercises or fall back to local data if empty
     const exercisesToUse = exercises.length > 0 ? exercises : localExercises;
-    
+
     // Create a custom workout using the recommended muscles and set allocations
     const allTargetedMuscles = [
       ...recommendation.primaryFocus,
       ...recommendation.secondaryFocus,
       ...recommendation.maintenance
     ];
-    
+
     const customWorkout = generateWorkout({
       userProfile,
       muscleMetrics,

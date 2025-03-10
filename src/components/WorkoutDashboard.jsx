@@ -74,6 +74,7 @@ const WorkoutDashboard = ({ muscleMetrics, userProfile }) => {
 // Replace the suggestWorkout function in WorkoutDashboard.jsx with this improved version
 
 // Generate a suggested workout based on metrics
+// Generate a suggested workout based on metrics
 const suggestWorkout = () => {
   const workout = {
     primaryFocus: [],
@@ -81,24 +82,57 @@ const suggestWorkout = () => {
     maintenance: []
   };
   
-  // Get all muscles that need work, sorted by priority
-  const muscleNeedsList = Object.entries(muscleMetrics)
-    .map(([muscle, metrics]) => ({
-      muscle,
-      isFocused: metrics.isFocused,
-      percentComplete: metrics.weeklyVolume / userProfile.muscleGroupSettings[muscle].minimumDose * 100,
-      volumeNeeded: metrics.volumeNeededForMinimum,
-      recoveryStatus: metrics.recoveryStatus
-    }))
-    .filter(item => item.volumeNeeded > 0) // Only include muscles below minimum
-    .sort((a, b) => {
-      // First, prioritize by focus
-      if (a.isFocused && !b.isFocused) return -1;
-      if (!a.isFocused && b.isFocused) return 1;
-      
-      // Then by percent complete (lowest first)
-      return a.percentComplete - b.percentComplete;
+  // First, separate muscle groups into two categories:
+  // 1. Those with zero weekly volume (highest priority)
+  // 2. Those with some volume but still below minimum (second priority)
+  
+  const zeroVolumeGroups = [];
+  const belowMinimumGroups = [];
+
+  Object.entries(muscleMetrics)
+    .forEach(([muscle, metrics]) => {
+      if (metrics.volumeNeededForMinimum > 0) {
+        // Check if this muscle group has received any volume this week
+        if (metrics.weeklyVolume === 0) {
+          zeroVolumeGroups.push({
+            muscle,
+            isFocused: metrics.isFocused,
+            volumeNeeded: metrics.volumeNeededForMinimum,
+            recoveryStatus: metrics.recoveryStatus
+          });
+        } else {
+          belowMinimumGroups.push({
+            muscle,
+            isFocused: metrics.isFocused,
+            percentComplete: metrics.weeklyVolume / userProfile.muscleGroupSettings[muscle].minimumDose * 100,
+            volumeNeeded: metrics.volumeNeededForMinimum,
+            recoveryStatus: metrics.recoveryStatus
+          });
+        }
+      }
     });
+  
+  // Sort both groups by focus (focused items first), then by recovery status or percent complete
+  const sortedZeroVolume = zeroVolumeGroups.sort((a, b) => {
+    // First prioritize by focus
+    if (a.isFocused && !b.isFocused) return -1;
+    if (!a.isFocused && b.isFocused) return 1;
+    
+    // Then by recovery status (more recovered first)
+    return b.recoveryStatus - a.recoveryStatus;
+  });
+  
+  const sortedBelowMinimum = belowMinimumGroups.sort((a, b) => {
+    // First prioritize by focus
+    if (a.isFocused && !b.isFocused) return -1;
+    if (!a.isFocused && b.isFocused) return 1;
+    
+    // Then by percent complete (lowest first)
+    return a.percentComplete - b.percentComplete;
+  });
+  
+  // Combine the two lists, with zero volume groups first
+  const muscleNeedsList = [...sortedZeroVolume, ...sortedBelowMinimum];
   
   console.log("Muscles sorted by priority:", muscleNeedsList);
   
@@ -110,9 +144,15 @@ const suggestWorkout = () => {
   
   // Add to primary focus with appropriate set counts
   primaryMuscles.forEach(item => {
-    // Calculate appropriate sets - more for higher priority or less complete
-    const setCount = item.percentComplete < 30 ? 5 : 
-                     item.percentComplete < 50 ? 4 : 3;
+    // Check if this is a zero volume muscle
+    const isZeroVolume = item.weeklyVolume === 0 || sortedZeroVolume.some(m => m.muscle === item.muscle);
+    
+    // Calculate appropriate sets
+    // Zero volume muscles get 5 sets
+    // Low volume muscles (below 30%) get 4 sets
+    // Others get 3 sets
+    const setCount = isZeroVolume ? 5 : 
+                     (item.percentComplete < 30) ? 4 : 3;
     
     workout.primaryFocus.push({
       muscle: item.muscle,
@@ -134,11 +174,11 @@ const suggestWorkout = () => {
   // Add maintenance work for well-recovered muscles that are above minimum
   // but could use some additional work (max 1-2)
   const maintenanceCandidates = Object.entries(muscleMetrics)
-    .filter(([_, metrics]) => 
+    .filter(([muscle, metrics]) => 
       metrics.recoveryStatus > 90 && // Well recovered
       metrics.volumeNeededForMinimum === 0 && // Meeting minimum
-      !workout.primaryFocus.some(m => m.muscle === _) && // Not already in primary
-      !workout.secondaryFocus.some(m => m.muscle === _) // Not already in secondary
+      !workout.primaryFocus.some(m => m.muscle === muscle) && // Not already in primary
+      !workout.secondaryFocus.some(m => m.muscle === muscle) // Not already in secondary
     )
     .sort((a, b) => b[1].recoveryStatus - a[1].recoveryStatus) // Most recovered first
     .slice(0, 1); // Just 1 maintenance muscle
@@ -152,7 +192,7 @@ const suggestWorkout = () => {
   
   return workout;
 };
-  
+
   const suggestedWorkout = suggestWorkout();
 
   return (

@@ -1,9 +1,10 @@
 // src/components/UserProfile.jsx
 import React, { useState, useEffect } from 'react';
 
+// Updated muscle groups with split leg categories
 const muscleGroups = [
   'chest', 'back', 'shoulders', 'biceps', 
-  'triceps', 'legs', 'core'
+  'triceps', 'quads', 'hamstrings', 'glutes', 'core'
 ];
 
 const equipment = [
@@ -11,7 +12,7 @@ const equipment = [
   'machine', 'bands', 'bodyweight', 'bench'
 ];
 
-// Default user profile settings
+// Updated default user profile settings with split leg muscle groups
 const defaultSettings = {
   name: "User",
   experienceLevel: "intermediate",
@@ -44,10 +45,20 @@ const defaultSettings = {
       focusTarget: 12,
       recoveryRate: 8,
     },
-    legs: {
-      minimumDose: 12,
-      focusTarget: 18,
-      recoveryRate: 5,
+    quads: {
+      minimumDose: 8,
+      focusTarget: 12,
+      recoveryRate: 6,
+    },
+    hamstrings: {
+      minimumDose: 8,
+      focusTarget: 12,
+      recoveryRate: 6,
+    },
+    glutes: {
+      minimumDose: 8,
+      focusTarget: 12,
+      recoveryRate: 6,
     },
     core: {
       minimumDose: 8,
@@ -64,7 +75,7 @@ const UserProfile = ({ initialProfile, onProfileUpdate }) => {
   // Initialize with provided profile data if available
   useEffect(() => {
     if (initialProfile) {
-      // Merge with defaults to ensure all fields exist
+      // Merge with defaults to ensure all fields exist, including the new split leg categories
       const mergedProfile = {
         ...defaultSettings,
         ...initialProfile,
@@ -73,6 +84,41 @@ const UserProfile = ({ initialProfile, onProfileUpdate }) => {
           ...(initialProfile.muscleGroupSettings || {})
         }
       };
+      
+      // If initialProfile had "legs" but not the new categories, migrate the settings
+      if (initialProfile.muscleGroupSettings && 
+          initialProfile.muscleGroupSettings.legs && 
+          (!initialProfile.muscleGroupSettings.quads || 
+           !initialProfile.muscleGroupSettings.hamstrings || 
+           !initialProfile.muscleGroupSettings.glutes)) {
+        
+        const legSettings = initialProfile.muscleGroupSettings.legs;
+        
+        // Copy legs settings to the three new categories if they don't already exist
+        if (!initialProfile.muscleGroupSettings.quads) {
+          mergedProfile.muscleGroupSettings.quads = { ...legSettings };
+        }
+        if (!initialProfile.muscleGroupSettings.hamstrings) {
+          mergedProfile.muscleGroupSettings.hamstrings = { ...legSettings };
+        }
+        if (!initialProfile.muscleGroupSettings.glutes) {
+          mergedProfile.muscleGroupSettings.glutes = { ...legSettings };
+        }
+        
+        // Remove the old legs category if it exists in the merged profile
+        if (mergedProfile.muscleGroupSettings.legs) {
+          delete mergedProfile.muscleGroupSettings.legs;
+        }
+        
+        // Update focus areas to replace "legs" with the new categories
+        if (mergedProfile.focusAreas && mergedProfile.focusAreas.includes('legs')) {
+          const updatedFocusAreas = mergedProfile.focusAreas.filter(area => area !== 'legs');
+          // Add all three new leg categories as focused if legs was focused
+          updatedFocusAreas.push('quads', 'hamstrings', 'glutes');
+          mergedProfile.focusAreas = updatedFocusAreas;
+        }
+      }
+      
       setProfile(mergedProfile);
     }
   }, [initialProfile]);
